@@ -2,6 +2,7 @@
 #include "ros/ros.h"
 #include "geometry_msgs/PoseStamped.h"
 #include "geometry_msgs/Twist.h"
+#include "visualization_msgs/Marker.h"
 #include "tf/transform_listener.h"
 #include "tf/transform_broadcaster.h"
 #include "costmap_2d/costmap_2d_ros.h"
@@ -18,15 +19,44 @@ public:
   void px4callback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
     tf::Transform transform;
     transform.setOrigin(tf::Vector3(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z));
-    tf::Quaternion q(msg->pose.orientation.x,msg->pose.orientation.y,msg->pose.orientation.z,msg->pose.orientation.w);
-    transform.setRotation(q);
-    global_pose = tf::StampedTransform(transform, ros::Time::now(), "map", "base_link");
-    _tf_br.sendTransform(global_pose);
+    tf::Quaternion q_base_link(msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z, msg->pose.orientation.w);
+    tf::Matrix3x3 m_base_link(q_base_link);
+
+    tfScalar roll, pitch, yaw;
+    m_base_link.getRPY(roll, pitch, yaw);
+
+    tf::Quaternion q_base_stabilized;
+    q_base_stabilized.setRPY(0.0, 0.0, yaw);
+
+    transform.setRotation(q_base_link);
+    transform.setRotation(q_base_stabilized);
+    _tf_br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "map", "base_link"));
+    _tf_br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "map", "base_stabilized"));
   }
 
 private:
   ros::Subscriber _px4_sub;
   tf::TransformBroadcaster _tf_br;
+};
+
+
+class ObstacleSub {
+public:
+  tf::Vector3 obs_center;
+  float obs_radius;
+
+  ObstacleSub(ros::NodeHandle ROS_n) {
+    _obs_sub = ROS_n.subscribe("/stereo_avoid/clusters/marker0", 1, &ObstacleSub::obscallback, this);
+  }
+
+  void obscallback(const visualization_msgs::Marker::ConstPtr& msg) {
+    obs_center[0] = msg->pose.position.x;
+    obs_center[1] = msg->pose.position.y;
+    obs_center[2] = msg->pose.position.z;
+    obs_radius = msg->scale.x;
+  }
+private:
+  ros::Subscriber _obs_sub;
 };
 
 int main(int argc, char **argv)
@@ -78,9 +108,10 @@ int main(int argc, char **argv)
   float obs_buffer = .5;
   float out_vel_max = 1;
 
-  float obs_radius = 1;
   float obs_vel_scale = 2;
-  tf::Vector3 obs_center(100, 100, 0);
+  // float obs_radius = 1;
+  // tf::Vector3 obs_center(100, 100, 0);
+  ObstacleSub obstacle_subscription(_n);
 
   // runs the control loop at 100Hz
   ros::Rate loop_rate(100);
@@ -94,11 +125,11 @@ int main(int argc, char **argv)
     tf::Vector3 demanded_vel(setpoint_vel);
 
     // compute delta vel from obstacle
-    tf::Vector3 delta_vel = px4_subscription.global_pose.getOrigin() - obs_center;
+    tf::Vector3 delta_vel = px4_subscription.global_pose.getOrigin() - obstacle_subscription.obs_center;
     delta_vel[2] = 0;
 
     // make the velocity be zero a little bit outside of the obstacle
-    float dist = delta_vel.length() - obs_radius - obs_buffer;
+    float dist = delta_vel.length() - obstacle_subscription.obs_radius - obs_buffer;
     if (dist > 1) {
       delta_vel.setZero();
     } else {
@@ -117,9 +148,9 @@ int main(int argc, char **argv)
 
     // add delta vel to setpoint_vel
     geometry_msgs::TwistStamped cmd_vel;
-    cmd_vel.twist.linear.x = out_vel.getX();
-    cmd_vel.twist.linear.y = out_vel.getY();
-    cmd_vel.twist.linear.z = out_vel.getZ();
+    cmd_vel.twist.linear.x = 0.75; //out_vel.getX();
+    cmd_vel.twist.linear.y = 0.0;//out_vel.getY();
+    cmd_vel.twist.linear.z = 0.0;//out_vel.getZ();
     cmd_vel.header.frame_id = "fcu";
 
     _px4_pub.publish(cmd_vel);
