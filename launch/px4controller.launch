@@ -1,5 +1,0 @@
-<launch>
-  <node name="px4controller" pkg="obs_avoid" type="px4controller" >
-    <rosparam file="$(find obs_avoid)/param/px4controller.yaml" command="load" ns="costmap" />
-  </node>
-</launch>
