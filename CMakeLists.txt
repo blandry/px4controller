@@ -10,7 +10,6 @@ find_package(catkin REQUIRED COMPONENTS
   mavros
   pcl_ros
   costmap_2d
-  dwa_local_planner
 )
 
 ## System dependencies are found with CMake's conventions
