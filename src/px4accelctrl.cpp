@@ -65,7 +65,7 @@ private:
 
 class RCSub {
 public:
-  tf::Vector3 get_setpoint_vel() {
+  tf::Vector3 get_setpoint_accel() {
     tf::Vector3 sp_vel;
     sp_vel[0] = -1.0 * (rc_channels[1] - 1500.0)/500.0;
     sp_vel[1] = -1.0 * (rc_channels[0] - 1500.0)/500.0;
@@ -93,86 +93,38 @@ private:
 
 int main(int argc, char **argv)
 {
-  float obs_buffer = .5;
-  float obs_vel_scale = 2;
+  float sp_accel_max = 4;
+  float out_accel_max = 4;
   
-  float sp_vel_max = 3;
-  float out_vel_max = 3;
-  
-  float YAW_P = 2.0;
-
-  ros::init(argc, argv, "px4controller");
+  ros::init(argc, argv, "px4accelctrl");
   ros::NodeHandle _n;
 
   // Gets messages from mavros and publishes them as transforms
   PX4Sub px4_subscription(_n);
-  // Gets the obstacles from computer vision
-  ObstacleSub obstacle_subscription(_n);
   // Gets messages from the artoo sticks (through mavros)
   RCSub rc_subscription(_n);
 
   // Sends commands back to px4
   ros::Publisher _px4_pub;
-  _px4_pub = _n.advertise<geometry_msgs::TwistStamped>("/mavros/setpoint_velocity/cmd_vel",1);
+  _px4_pub = _n.advertise<geometry_msgs::Vector3Stamped>("/mavros/setpoint_accel/accel",1);
   
   // runs the control loop at 100Hz
   ros::Rate loop_rate(100);
   while (ros::ok())
   {
-    tf::Vector3 setpoint_vel;
-    setpoint_vel = rc_subscription.get_setpoint_vel();
+    tf::Vector3 setpoint_accel;
+    setpoint_accel = rc_subscription.get_setpoint_accel();
     for (int i=0; i<3; i++) {
-      setpoint_vel[i] *= sp_vel_max;
-    }
-    
-    tf::Vector3 delta_vel;
-    delta_vel.setZero();
-    if (obstacle_subscription.received_obs) {
-      // compute delta vel from obstacle
-      
-      delta_vel = px4_subscription.global_pose.getOrigin() - obstacle_subscription.obs_center;
-      // ignore the z component, obstacles are infinite
-      delta_vel[2] = 0;
-
-      // make the velocity be zero a buffer distance away from the obstacle
-      float dist = delta_vel.length() - obstacle_subscription.obs_radius - obs_buffer;
-      if (dist > 1) {
-        delta_vel.setZero();
-      } else {
-        if (delta_vel.length()>0) {
-          delta_vel /= delta_vel.length();
-          delta_vel *= obs_vel_scale * setpoint_vel.length() / (1+dist);
-        }
-      }
+      setpoint_accel[i] *= sp_accel_max;
     }
 
-    // compute the demanded velocity
-    tf::Vector3 out_vel = setpoint_vel + delta_vel;
-    if (out_vel.length()>out_vel_max && out_vel.length()>0) {
-      out_vel /= out_vel.length();
-      out_vel *= out_vel_max;
-    }
-
-    // // compute the desired yaw to keep the copter pointing forward
-    // double setpoint_yaw = atan2((double)out_vel.getY(),(double)out_vel.getX());
-    // //ROS_INFO("setpoint yaw: %.8f",setpoint_yaw);
-    // 
-    // // P-controller on yaw
-    // float err_yaw = (float)setpoint_yaw - (float)px4_subscription.yaw;
-    // if (err_yaw>180) {
-    //   err_yaw = 360 - err_yaw;
-    // }
-    // float out_yaw_rate = YAW_P * err_yaw;
-    float out_yaw_rate = 0.0;
-
-    // send the desired velocity and yaw rate
-    geometry_msgs::TwistStamped cmd_vel;
-    cmd_vel.twist.linear.x = out_vel.getX();
-    cmd_vel.twist.linear.y = out_vel.getY();
-    cmd_vel.twist.linear.z = out_vel.getZ();
-    cmd_vel.twist.angular.z = out_yaw_rate; 
-    cmd_vel.header.frame_id = "fcu";
-    _px4_pub.publish(cmd_vel);
+    // send the desired acceleration
+    geometry_msgs::Vector3Stamped cmd_accel;
+    cmd_accel.vector.x = setpoint_accel.getX();
+    cmd_accel.vector.y = setpoint_accel.getY();
+    cmd_accel.vector.z = setpoint_accel.getZ();
+    cmd_accel.header.frame_id = "fcu";
+    _px4_pub.publish(cmd_accel);
 
     ros::spinOnce();
     loop_rate.sleep();

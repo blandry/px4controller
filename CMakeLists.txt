@@ -193,3 +193,6 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(px4controller src/px4controller.cpp)
 target_link_libraries(px4controller ${catkin_LIBRARIES})
+
+add_executable(px4accelctrl src/px4accelctrl.cpp)
+target_link_libraries(px4accelctrl ${catkin_LIBRARIES})
